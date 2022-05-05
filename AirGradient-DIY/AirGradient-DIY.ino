@@ -65,7 +65,7 @@ void setup() {
   // Init Display.
   display.init();
   display.flipScreenVertically();
-  showTextRectangle("Init", String(ESP.getChipId(),HEX),true);
+  showTextRectangle("Init", String(ESP.getChipId(), HEX), true);
 #endif // SET_DISPLAY
 
   // Enable enabled sensors.
@@ -80,13 +80,13 @@ void setup() {
 #endif // SET_SHT
 
   // Set static IP address if configured.
-  #ifdef staticip
-  WiFi.config(static_ip,gateway,subnet);
-  #endif
+#ifdef staticip
+  WiFi.config(static_ip, gateway, subnet);
+#endif // staticip
 
   // Set WiFi mode to client (without this it may try to act as an AP).
   WiFi.mode(WIFI_STA);
-  
+
   // Configure Hostname
   if ((deviceId != NULL) && (deviceId[0] == '\0')) {
     Serial.printf("No Device ID is Defined, Defaulting to board defaults");
@@ -95,7 +95,7 @@ void setup() {
     wifi_station_set_hostname(deviceId);
     WiFi.setHostname(deviceId);
   }
-  
+
   // Setup and wait for WiFi.
   WiFi.begin(ssid, password);
   Serial.println("");
@@ -107,8 +107,7 @@ void setup() {
     Serial.print(".");
   }
 
-  Serial.println("");
-  Serial.print("Connected to ");
+  Serial.print("\nConnected to ");
   Serial.println(ssid);
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
@@ -135,12 +134,17 @@ void loop() {
 }
 
 void update() {
+  int value = 0;
 #ifdef SET_PM
-  value_pm  = ag.getPM2_Raw();
+  value = ag.getPM2_Raw();
+  if(value)
+    value_pm = value;
 #endif // SET_PM
 
 #ifdef SET_CO2
-  value_co2 = ag.getCO2_Raw();
+  value = ag.getCO2_Raw();
+  if(value)
+    value_co2 = value;
 #endif // SET_CO2
 
 #ifdef SET_SHT
