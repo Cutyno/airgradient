@@ -1,9 +1,11 @@
+#include <dummy.h>
+
 /*
  * This sketch connects an AirGradient DIY sensor to a WiFi network, and runs a
  * tiny HTTP server to serve air quality metrics to Prometheus.
  */
 
-#include <AirGradient.h>
+#include "AirGradient.h"
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 #include <WiFiClient.h>
@@ -23,11 +25,14 @@ const char temp_display = 'C';
 #define SET_CO2
 #define SET_SHT
 #define SET_DISPLAY
+#define SET_WIFI
 
 // WiFi and IP connection info.
+#ifdef SET_WIFI
 const char* ssid = "PleaseChangeMe";
 const char* password = "PleaseChangeMe";
 const int port = 9926;
+
 
 // Uncomment the line below to configure a static IP address.
 // #define staticip
@@ -36,11 +41,13 @@ IPAddress static_ip(192, 168, 0, 0);
 IPAddress gateway(192, 168, 0, 0);
 IPAddress subnet(255, 255, 255, 0);
 #endif
+#endif // SET_WIFI
 
 #ifdef SET_DISPLAY
 // The frequency of measurement updates.
 const int updateFrequency = 5000;
 const int displayTime = 5000;
+//#define ROTATE_DISPLAY
 #endif // SET_DISPLAY
 
 // Config End ------------------------------------------------------------------
@@ -49,10 +56,12 @@ const int displayTime = 5000;
 #define ERROR_SHT 0x02
 #define ERROR_CO2 0x04
 
-AirGradient ag = AirGradient();
+AirGradient ag = AirGradient(true);
 
-TMP_RH value_sht;
-int value_pm;
+TMP_RH_raw value_sht;
+int value_pm1;
+int value_pm2_5;
+int value_pm10;
 int value_co2;
 
 #ifdef SET_DISPLAY
@@ -60,7 +69,9 @@ long lastUpdate = 0;
 #endif // SET_DISPLAY
 
 SSD1306Wire display(0x3c, SDA, SCL);
+#ifdef SET_WIFI
 ESP8266WebServer server(port);
+#endif
 
 void setup() {
   Serial.begin(9600);
@@ -68,7 +79,9 @@ void setup() {
 #ifdef SET_DISPLAY
   // Init Display.
   display.init();
+#ifdef ROTATE_DISPLAY
   display.flipScreenVertically();
+#endif
   showTextRectangle("Init", String(ESP.getChipId(), HEX), true);
 #endif // SET_DISPLAY
 
@@ -80,9 +93,10 @@ void setup() {
   ag.CO2_Init();
 #endif // SET_CO2
 #ifdef SET_SHT
-  ag.TMP_RH_Init(0x44);
+  ag.SHT_Init(0x44);
 #endif // SET_SHT
 
+#ifdef SET_WIFI
   // Set static IP address if configured.
 #ifdef staticip
   WiFi.config(static_ip, gateway, subnet);
@@ -128,10 +142,13 @@ void setup() {
 #ifdef SET_DISPLAY
   showTextRectangle("Listening To", WiFi.localIP().toString() + ":" + String(port), true);
 #endif // SET_DISPLAY
+#endif // SET_WIFI
 }
 
 void loop() {
+#ifdef SET_WIFI
   server.handleClient();
+#endif // SET_WIFI
 #ifdef SET_DISPLAY
   updateScreen(millis());
 #endif // SET_DISPLAY
@@ -141,9 +158,14 @@ uint8_t update() {
   uint8_t result = 0;
 #ifdef SET_PM
   {
-    int value = ag.getPM2_Raw();
-    if(value)
-      value_pm = value;
+    PMS::DATA value;
+    ag.pms.requestRead();
+    if (ag.pms.readUntil(value))
+    {
+      value_pm1 = value.PM_AE_UG_1_0;
+      value_pm2_5 = value.PM_AE_UG_2_5;
+      value_pm10 = value.PM_AE_UG_10_0;
+    }
     else
       result += ERROR_PMS;
   }
@@ -151,7 +173,7 @@ uint8_t update() {
 
 #ifdef SET_CO2
   {
-    int value = ag.getCO2_Raw();
+    int value = ag.co2->get_co2();
     if(value > 0)
       value_co2 = value;
     else
@@ -161,7 +183,7 @@ uint8_t update() {
 
 #ifdef SET_SHT
   {
-    TMP_RH value = ag.periodicFetchData();
+    TMP_RH_raw value = ag.sht.periodicFetchData_raw();
     if(value.t != NULL && value.rh != NULL)
       value_sht = value;
     else
@@ -175,6 +197,7 @@ uint8_t update() {
   return result;
 }
 
+#ifdef SET_WIFI
 String GenerateMetrics() {
   String message = "";
   String idString = "{id=\"" + String(deviceId) + "\",mac=\"" + WiFi.macAddress().c_str() + "\"}";
@@ -185,21 +208,31 @@ String GenerateMetrics() {
 #ifdef SET_PM
   if(!(error & ERROR_PMS))
   {
-    message += "# HELP pm02 Particulate Matter PM2.5 value\n";
-    message += "# TYPE pm02 gauge\n";
-    message += "pm02";
+    message +=  "# HELP pm01 Particulate Matter PM1 value\n"
+                "# TYPE pm01 gauge\n"
+                "pm01";
     message += idString;
-    message += String(value_pm);
-    message += "\n"; 
+    message += String(value_pm1);
+    message +=  "\n# HELP pm02 Particulate Matter PM2.5 value\n"
+                "# TYPE pm02 gauge\n"
+                "pm02";
+    message += idString;
+    message += String(value_pm2_5);
+    message +=  "\n# HELP pm10 Particulate Matter PM10 value\n"
+                "# TYPE pm10 gauge\n"
+                "pm10";
+    message += idString;
+    message += String(value_pm10);
+    message += "\n";
   }
 #endif // SET_PM
 
 #ifdef SET_CO2
   if(!(error & ERROR_CO2))
   {
-    message += "# HELP rco2 CO2 value, in ppm\n";
-    message += "# TYPE rco2 gauge\n";
-    message += "rco2";
+    message +=  "# HELP rco2 CO2 value, in ppm\n"
+                "# TYPE rco2 gauge\n"
+                "rco2";
     message += idString;
     message += String(value_co2);
     message += "\n";
@@ -209,14 +242,14 @@ String GenerateMetrics() {
 #ifdef SET_SHT
   if(!(error & ERROR_SHT))
   {
-    message += "# HELP atmp Temperature, in degrees Celsius\n";
-    message += "# TYPE atmp gauge\n";
-    message += "atmp";
+    message +=  "# HELP atmp Temperature, in degrees Celsius\n"
+                "# TYPE atmp gauge\n"
+                "atmp";
     message += idString;
     message += String(value_sht.t);
-    message += "\n# HELP rhum Relative humidity, in percent\n";
-    message += "# TYPE rhum gauge\n";
-    message += "rhum";
+    message +=  "\n# HELP rhum Relative humidity, in percent\n"
+                "# TYPE rhum gauge\n"
+                "rhum";
     message += idString;
     message += String(value_sht.rh);
     message += "\n";
@@ -231,8 +264,8 @@ void HandleRoot() {
 }
 
 void HandleNotFound() {
-  String message = "File Not Found\n\n";
-  message += "URI: ";
+  String message = "File Not Found\n\n"
+              "URI: ";
   message += server.uri();
   message += "\nMethod: ";
   message += (server.method() == HTTP_GET) ? "GET" : "POST";
@@ -244,6 +277,7 @@ void HandleNotFound() {
   }
   server.send(404, "text/html", message);
 }
+#endif // SET_WIFI
 
 // DISPLAY
 #ifdef SET_DISPLAY
@@ -255,8 +289,13 @@ void showTextRectangle(String ln1, String ln2, boolean small) {
   } else {
     display.setFont(ArialMT_Plain_24);
   }
+#ifdef ROTATE_DISPLAY
   display.drawString(32, 16, ln1);
   display.drawString(32, 36, ln2);
+#else
+  display.drawString(32, 0, ln1);
+  display.drawString(32, 20, ln2);
+#endif
   display.display();
 }
 
@@ -272,7 +311,7 @@ void updateScreen(long now) {
   switch (state) {
     case 0:
 #ifdef SET_PM
-      showTextRectangle("PM2", String(value_pm), false);
+      showTextRectangle("PM2", String(value_pm2_5), false);
       break;
 #else
       state = 1;
