@@ -2,13 +2,22 @@
  * This sketch connects an AirGradient DIY sensor to a WiFi network, and runs a
  * tiny HTTP server to serve air quality metrics to Prometheus.
  */
+ 
+// Hardware options for AirGradient DIY sensor.
+#define SET_PM
+#define SET_CO2
+#define SET_SHT
+#define SET_DISPLAY
 
 #include <AirGradient.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 #include <WiFiClient.h>
+
+#ifdef SET_DISPLAY
 #include <Wire.h>
 #include "SSD1306Wire.h"
+#endif
 
 // Config ----------------------------------------------------------------------
 
@@ -17,12 +26,6 @@ const char* deviceId = "";
 
 // set to 'F' to switch display from Celcius to Fahrenheit
 const char temp_display = 'C';
-
-// Hardware options for AirGradient DIY sensor.
-#define SET_PM
-#define SET_CO2
-#define SET_SHT
-#define SET_DISPLAY
 
 // WiFi and IP connection info.
 const char* ssid = "PleaseChangeMe";
@@ -57,9 +60,9 @@ int value_co2;
 
 #ifdef SET_DISPLAY
 long lastUpdate = 0;
+SSD1306Wire display(0x3c, SDA, SCL);
 #endif // SET_DISPLAY
 
-SSD1306Wire display(0x3c, SDA, SCL);
 ESP8266WebServer server(port);
 
 void setup() {
